@@ -98,7 +98,11 @@ public class SocketNode implements Runnable {
 		JSONObject obj = new JSONObject();
 
 		// properties
-		String contextName = event.getLoggerContextVO().getName();
+		String contextName = event.getLoggerContextVO() == null ? null : event.getLoggerContextVO().getName();
+		if (contextName == null || contextName.length() == 0) {
+			contextName = "localclient";
+		}
+		
 		obj.put("timestamp", event.getTimeStamp());
 		obj.put("message", event.getFormattedMessage());
 		if (remoteSocketAddress instanceof InetSocketAddress) {
