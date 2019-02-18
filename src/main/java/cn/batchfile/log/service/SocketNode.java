@@ -25,6 +25,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 public class SocketNode implements Runnable {
 
 	protected static final Logger logger = LoggerFactory.getLogger(SocketNode.class);
+	private static final String DEFAULT_CONTEXT_NAME = "localclient";
 	private Counter counter;
 	private Counter unsupportedDataTypeCounter;
 	
@@ -73,6 +74,11 @@ public class SocketNode implements Runnable {
 					throw new UnsupportedDataTypeException(event.getClass().getName());
 				}
 				
+				if (remoteSocketAddress instanceof InetSocketAddress) {
+					obj.put("host", ((InetSocketAddress) remoteSocketAddress).getHostString());
+					obj.put("port", String.valueOf(((InetSocketAddress) remoteSocketAddress).getPort()));
+				}
+				
 				// 设置计数器
 				counter.increment();
 
@@ -97,18 +103,12 @@ public class SocketNode implements Runnable {
 	private JSONObject composeLogObject(ILoggingEvent event) {
 		JSONObject obj = new JSONObject();
 
-		// properties
 		String contextName = event.getLoggerContextVO() == null ? null : event.getLoggerContextVO().getName();
 		if (contextName == null || contextName.length() == 0) {
-			contextName = "localclient";
+			contextName = DEFAULT_CONTEXT_NAME;
 		}
-		
 		obj.put("timestamp", event.getTimeStamp());
 		obj.put("message", event.getFormattedMessage());
-		if (remoteSocketAddress instanceof InetSocketAddress) {
-			obj.put("host", ((InetSocketAddress) remoteSocketAddress).getHostString());
-			obj.put("port", String.valueOf(((InetSocketAddress) remoteSocketAddress).getPort()));
-		}
 		obj.put("level", event.getLevel().toString());
 		obj.put("thread", event.getThreadName());
 		obj.put("logger", event.getLoggerName());
@@ -128,15 +128,11 @@ public class SocketNode implements Runnable {
 
 		Map<?, ?> properties = event.getProperties();
 		Object application = properties.get("application");
-		String contextName = application == null || application.toString().length() == 0 ? "localclient"
+		String contextName = application == null || application.toString().length() == 0 ? DEFAULT_CONTEXT_NAME
 				: application.toString();
 
 		obj.put("timestamp", event.getTimeStamp());
 		obj.put("message", event.getRenderedMessage());
-		if (remoteSocketAddress instanceof InetSocketAddress) {
-			obj.put("host", ((InetSocketAddress) remoteSocketAddress).getHostString());
-			obj.put("port", String.valueOf(((InetSocketAddress) remoteSocketAddress).getPort()));
-		}
 		obj.put("level", event.getLevel().toString());
 		obj.put("thread", event.getThreadName());
 		obj.put("logger", event.getLoggerName());
