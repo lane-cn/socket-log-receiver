@@ -20,6 +20,8 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.core.rolling.RollingFileAppender;
 import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Service
 public class StoreService {
@@ -41,6 +43,10 @@ public class StoreService {
 	
 	@Value("${store.days:30}")
 	private int storeDays;
+	
+	public StoreService(MeterRegistry registry) {
+		Gauge.builder("store.queue.size", "", s -> queueSize.get()).register(registry);
+	}
 	
 	public void store(final JSONObject event) {
 		// 判断处理队列是不是在积压，积压情况下抛弃一部分日志

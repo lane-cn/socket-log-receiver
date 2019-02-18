@@ -6,6 +6,7 @@ import java.io.ObjectInputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,11 +17,12 @@ import com.alibaba.fastjson.JSONObject;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.classic.spi.StackTraceElementProxy;
+import io.micrometer.core.instrument.MeterRegistry;
 
 public class SocketNode implements Runnable {
 
 	protected static final Logger logger = LoggerFactory.getLogger(SocketNode.class);
-	
+
 	Socket socket;
 	ObjectInputStream ois;
 	SocketAddress remoteSocketAddress;
@@ -29,7 +31,7 @@ public class SocketNode implements Runnable {
 	SocketService socketService;
 	StoreService storeService;
 
-	public SocketNode(SocketService socketService, Socket socket, StoreService storeService) {
+	public SocketNode(SocketService socketService, Socket socket, StoreService storeService, MeterRegistry registry) {
 		this.socketService = socketService;
 		this.socket = socket;
 		this.storeService = storeService;
@@ -44,17 +46,20 @@ public class SocketNode implements Runnable {
 			closed = true;
 		}
 
-		ILoggingEvent event;
-		// Logger remoteLogger;
+		Object event = null;
 
 		try {
 			while (!closed) {
 				// read an event from the wire
-				event = (ILoggingEvent) ois.readObject();
+				event = ois.readObject();
+				JSONObject obj = null;
 
-				// compose log object
-				JSONObject obj = composeLogObject(event);
-				//logger.info(obj.toString());
+				// compose object
+				if (event instanceof ILoggingEvent) {
+					obj = composeLogObject((ILoggingEvent) event);
+				} else if (event instanceof org.apache.log4j.spi.LoggingEvent) {
+					obj = composeLogObject((org.apache.log4j.spi.LoggingEvent) event);
+				}
 
 				// store log object
 				storeService.store(obj);
@@ -76,14 +81,14 @@ public class SocketNode implements Runnable {
 
 	private JSONObject composeLogObject(ILoggingEvent event) {
 		JSONObject obj = new JSONObject();
-		
+
 		// properties
 		String contextName = event.getLoggerContextVO().getName();
 		obj.put("timestamp", event.getTimeStamp());
 		obj.put("message", event.getFormattedMessage());
 		if (remoteSocketAddress instanceof InetSocketAddress) {
-			obj.put("host", ((InetSocketAddress)remoteSocketAddress).getHostString());
-			obj.put("port", String.valueOf(((InetSocketAddress)remoteSocketAddress).getPort()));
+			obj.put("host", ((InetSocketAddress) remoteSocketAddress).getHostString());
+			obj.put("port", String.valueOf(((InetSocketAddress) remoteSocketAddress).getPort()));
 		}
 		obj.put("level", event.getLevel().toString());
 		obj.put("thread", event.getThreadName());
@@ -99,18 +104,72 @@ public class SocketNode implements Runnable {
 		return obj;
 	}
 
+	private JSONObject composeLogObject(org.apache.log4j.spi.LoggingEvent event) {
+		JSONObject obj = new JSONObject();
+
+		Map<?, ?> properties = event.getProperties();
+		Object application = properties.get("application");
+		String contextName = application == null || application.toString().length() == 0 ? "localclient"
+				: application.toString();
+
+		obj.put("timestamp", event.getTimeStamp());
+		obj.put("message", event.getRenderedMessage());
+		if (remoteSocketAddress instanceof InetSocketAddress) {
+			obj.put("host", ((InetSocketAddress) remoteSocketAddress).getHostString());
+			obj.put("port", String.valueOf(((InetSocketAddress) remoteSocketAddress).getPort()));
+		}
+		obj.put("level", event.getLevel().toString());
+		obj.put("thread", event.getThreadName());
+		obj.put("logger", event.getLoggerName());
+		obj.put("context", contextName);
+		String ex = composeException(event.getThrowableInformation());
+		if (!StringUtils.isEmpty(ex)) {
+			obj.put("exception", ex);
+		}
+
+		obj.put("mdc", properties);
+
+		return obj;
+	}
+
+	private String composeException(org.apache.log4j.spi.ThrowableInformation throwable) {
+		if (throwable == null) {
+			return null;
+		}
+
+		StringBuilder s = new StringBuilder();
+		s.append(throwable.getThrowable().getClass().getName()).append(": ")
+				.append(throwable.getThrowable().getMessage()).append('\n');
+
+		for (StackTraceElement element : throwable.getThrowable().getStackTrace()) {
+			s.append('\t').append(element.toString()).append('\n');
+		}
+
+		Throwable cause = throwable.getThrowable().getCause();
+		while (cause != null) {
+			s.append("Caused by: ").append(cause.getClass().getName()).append(": ").append(cause.getMessage())
+					.append('\n');
+			for (StackTraceElement element : cause.getStackTrace()) {
+				s.append('\t').append(element.toString()).append('\n');
+			}
+			cause = cause.getCause();
+		}
+
+		return s.toString();
+	}
+
 	private String composeException(IThrowableProxy throwable) {
 		if (throwable == null) {
 			return null;
 		}
-		
+
 		StringBuilder s = new StringBuilder();
 		s.append(throwable.getClassName()).append(": ").append(throwable.getMessage()).append('\n');
-		
+
 		for (StackTraceElementProxy element : throwable.getStackTraceElementProxyArray()) {
 			s.append('\t').append(element.getSTEAsString()).append('\n');
 		}
-		
+
 		IThrowableProxy cause = throwable.getCause();
 		while (cause != null) {
 			s.append("Caused by: ").append(cause.getClassName()).append(": ").append(cause.getMessage()).append('\n');
@@ -119,7 +178,7 @@ public class SocketNode implements Runnable {
 			}
 			cause = cause.getCause();
 		}
-		
+
 		return s.toString();
 	}
 
