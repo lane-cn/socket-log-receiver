@@ -20,14 +20,20 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.core.rolling.RollingFileAppender;
 import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 @Service
 public class StoreService {
 
 	protected static final org.slf4j.Logger log = LoggerFactory.getLogger(StoreService.class);
-	
+	private Counter storeCounter;
+	private Counter discardCounter;
+	private Counter errorCounter;
+	private Timer timer;
+
 	private Map<String, Logger> loggers = new ConcurrentHashMap<String, Logger>();
 	private AtomicInteger queueSize = new AtomicInteger(0);
 	private ExecutorService executorService = null;
@@ -46,12 +52,18 @@ public class StoreService {
 	
 	public StoreService(MeterRegistry registry) {
 		Gauge.builder("store.queue.size", "", s -> queueSize.get()).register(registry);
+		Gauge.builder("store.logger.count", "", s -> loggers.size()).register(registry);
+		storeCounter = Counter.builder("store.count").register(registry);
+		discardCounter = Counter.builder("store.discard.count").register(registry);
+		errorCounter = Counter.builder("store.error.count").register(registry);
+		timer = Timer.builder("store.response.time").register(registry);
 	}
 	
 	public void store(final JSONObject event) {
 		// 判断处理队列是不是在积压，积压情况下抛弃一部分日志
 		if (queueSize.incrementAndGet() > maxQueueSize) {
 			log.debug("exceed max queue size, discard file log");
+			discardCounter.increment();
 			queueSize.decrementAndGet();
 			return;
 		}
@@ -73,13 +85,20 @@ public class StoreService {
 	
 	private void writeFile(JSONObject event) {
 		assert(event.size() > 0);
-		String context = event.getString("context");
-		if (StringUtils.isEmpty(context)) {
-			context = "app";
+		try {
+			String context = event.getString("context");
+			if (StringUtils.isEmpty(context)) {
+				context = "app";
+			}
+			final Logger logger = getOrCreateLogger(context);
+	
+			timer.record(() -> {
+				logger.info(event.toString());
+				storeCounter.increment();
+			});
+		} catch (Exception e) {
+			errorCounter.increment();
 		}
-		Logger logger = getOrCreateLogger(context);
-
-		logger.info(event.toString());
 	}
 	
 	private Logger getOrCreateLogger(String name) {

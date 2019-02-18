@@ -8,6 +8,8 @@ import java.net.Socket;
 import java.net.SocketAddress;
 import java.util.Map;
 
+import javax.activation.UnsupportedDataTypeException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
@@ -17,12 +19,15 @@ import com.alibaba.fastjson.JSONObject;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.classic.spi.StackTraceElementProxy;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 
 public class SocketNode implements Runnable {
 
 	protected static final Logger logger = LoggerFactory.getLogger(SocketNode.class);
-
+	private Counter counter;
+	private Counter unsupportedDataTypeCounter;
+	
 	Socket socket;
 	ObjectInputStream ois;
 	SocketAddress remoteSocketAddress;
@@ -32,6 +37,10 @@ public class SocketNode implements Runnable {
 	StoreService storeService;
 
 	public SocketNode(SocketService socketService, Socket socket, StoreService storeService, MeterRegistry registry) {
+		//注册指标
+		counter = Counter.builder("event.count").register(registry);
+		unsupportedDataTypeCounter = Counter.builder("event.unsupported.data.type.count").register(registry);
+		
 		this.socketService = socketService;
 		this.socket = socket;
 		this.storeService = storeService;
@@ -59,7 +68,13 @@ public class SocketNode implements Runnable {
 					obj = composeLogObject((ILoggingEvent) event);
 				} else if (event instanceof org.apache.log4j.spi.LoggingEvent) {
 					obj = composeLogObject((org.apache.log4j.spi.LoggingEvent) event);
+				} else {
+					unsupportedDataTypeCounter.increment();
+					throw new UnsupportedDataTypeException(event.getClass().getName());
 				}
+				
+				// 设置计数器
+				counter.increment();
 
 				// store log object
 				storeService.store(obj);
