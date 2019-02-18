@@ -153,21 +153,10 @@ public class SocketNode implements Runnable {
 		}
 
 		StringBuilder s = new StringBuilder();
-		s.append(throwable.getThrowable().getClass().getName()).append(": ")
-				.append(throwable.getThrowable().getMessage()).append('\n');
-
-		for (StackTraceElement element : throwable.getThrowable().getStackTrace()) {
-			s.append('\t').append(element.toString()).append('\n');
-		}
-
-		Throwable cause = throwable.getThrowable().getCause();
-		while (cause != null) {
-			s.append("Caused by: ").append(cause.getClass().getName()).append(": ").append(cause.getMessage())
-					.append('\n');
-			for (StackTraceElement element : cause.getStackTrace()) {
-				s.append('\t').append(element.toString()).append('\n');
+		if (throwable.getThrowableStrRep() != null) {
+			for (String str : throwable.getThrowableStrRep()) {
+				s.append(str).append('\n');
 			}
-			cause = cause.getCause();
 		}
 
 		return s.toString();
